@@ -52,6 +52,10 @@
     padding:10px 12px; border-radius:var(--radius); margin-bottom:16px; display:none;
   }
   .rodape-login{margin-top:20px; font-size:12px; color:var(--ink-faint); text-align:center;}
+  .info-senha{
+    background:var(--accent-soft); color:var(--accent); font-size:13px;
+    padding:10px 12px; border-radius:var(--radius); margin-bottom:16px;
+  }
 
   /* ===== APP ===== */
   #app{display:none; min-height:100vh;}
@@ -144,6 +148,22 @@
 </head>
 <body>
 
+<!-- ============== TELA DE DEFINIR SENHA (após convite) ============== -->
+<div id="tela-definir-senha" style="display:none; min-height:100vh; align-items:center; justify-content:center; padding:24px;">
+  <div class="cartao-login">
+    <h1>Definir senha</h1>
+    <p class="sub">Crie a senha que vai usar para entrar no painel</p>
+    <div class="erro-login" id="erro-definir-senha"></div>
+    <form id="form-definir-senha">
+      <label for="nova-senha">Nova senha</label>
+      <input type="password" id="nova-senha" required minlength="6" autocomplete="new-password">
+      <label for="confirmar-senha">Confirmar senha</label>
+      <input type="password" id="confirmar-senha" required minlength="6" autocomplete="new-password">
+      <button type="submit" class="primario" id="btn-definir-senha">Salvar senha e entrar</button>
+    </form>
+  </div>
+</div>
+
 <!-- ============== TELA DE LOGIN ============== -->
 <div id="tela-login">
   <div class="cartao-login">
@@ -210,7 +230,7 @@
 // CONFIGURAÇÃO — substitua pelos valores do seu projeto Supabase
 // =====================================================================
 const SUPABASE_URL = 'https://xtkgwqynvrwonfwkurrc.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_G0wADH5OQEXY16UXTZjvWw_lmDMGtcw';
+const SUPABASE_ANON_KEY = 'COLE_AQUI_SUA_ANON_KEY';
 const EDGE_FUNCTION_URL = SUPABASE_URL + '/functions/v1/consultar-recolhas';
 
 const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -221,6 +241,72 @@ let clientesDisponiveis = [];
 let unidadesDoClienteAtual = [];
 let graficoStatus = null;
 let graficoMotivos = null;
+
+// ---------------------------------------------------------------------
+// DETECTAR LINK DE CONVITE OU RECUPERAÇÃO DE SENHA
+// O Supabase, ao clicar no link do e-mail, redireciona com tokens
+// na URL (#access_token=...&type=invite ou type=recovery). Precisamos
+// capturar isso e mostrar a tela de "definir senha" em vez do login normal.
+// ---------------------------------------------------------------------
+async function verificarLinkDeConvite() {
+  const hash = window.location.hash;
+  if (!hash || !hash.includes('access_token')) return false;
+
+  const params = new URLSearchParams(hash.substring(1));
+  const tipo = params.get('type');
+
+  if (tipo === 'invite' || tipo === 'recovery') {
+    // O supabase-js já processa o hash da URL automaticamente ao carregar
+    // e cria uma sessão temporária. Vamos confirmar que existe sessão.
+    const { data } = await supabase.auth.getSession();
+    if (data?.session) {
+      sessaoAtual = data.session;
+      document.getElementById('tela-login').style.display = 'none';
+      document.getElementById('tela-definir-senha').style.display = 'flex';
+      return true;
+    }
+  }
+  return false;
+}
+
+document.getElementById('form-definir-senha').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const novaSenha = document.getElementById('nova-senha').value;
+  const confirmarSenha = document.getElementById('confirmar-senha').value;
+  const erroBox = document.getElementById('erro-definir-senha');
+  const btn = document.getElementById('btn-definir-senha');
+  erroBox.style.display = 'none';
+
+  if (novaSenha !== confirmarSenha) {
+    erroBox.textContent = 'As senhas não coincidem.';
+    erroBox.style.display = 'block';
+    return;
+  }
+  if (novaSenha.length < 6) {
+    erroBox.textContent = 'A senha precisa ter no mínimo 6 caracteres.';
+    erroBox.style.display = 'block';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Salvando...';
+
+  const { data, error } = await supabase.auth.updateUser({ password: novaSenha });
+
+  btn.disabled = false;
+  btn.textContent = 'Salvar senha e entrar';
+
+  if (error) {
+    erroBox.textContent = 'Não foi possível salvar a senha. Tente novamente.';
+    erroBox.style.display = 'block';
+    return;
+  }
+
+  // Limpa o token da URL por segurança e entra no app
+  window.history.replaceState(null, '', window.location.pathname);
+  document.getElementById('tela-definir-senha').style.display = 'none';
+  await iniciarApp(data.session || sessaoAtual);
+});
 
 // ---------------------------------------------------------------------
 // LOGIN
@@ -256,6 +342,9 @@ document.getElementById('btn-sair').addEventListener('click', async () => {
 
 // Verifica se já existe sessão ativa ao carregar a página
 (async () => {
+  const eraConvite = await verificarLinkDeConvite();
+  if (eraConvite) return;
+
   const { data } = await supabase.auth.getSession();
   if (data?.session) {
     await iniciarApp(data.session);
